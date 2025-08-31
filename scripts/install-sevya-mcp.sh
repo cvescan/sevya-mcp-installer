@@ -268,13 +268,13 @@ async function makeSevyaRequest<T>(endpoint: string, method: string = "GET", dat
 server.tool(
   "get_opportunities",
   "Récupère les opportunités commerciales (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max d'opportunités à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -337,14 +337,14 @@ server.tool(
 server.tool(
   "get_clients",
   "Récupère les clients (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max de clients à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Créés après cette date (ISO)"),
     to_date: z.string().optional().describe("Créés avant cette date (ISO)"),
     inactive_label: z.string().optional().describe("Libellé statut considéré comme inactif (par défaut: inactive/inactif)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date, inactive_label }) => {
     if (!checkRateLimit("get_clients")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -411,13 +411,13 @@ server.tool(
 server.tool(
   "get_purchases",
   "Récupère les ventes/achats (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max de ventes à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_purchases")) {
       return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] } as any;
