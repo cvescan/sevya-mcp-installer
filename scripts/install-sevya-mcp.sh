@@ -203,6 +203,16 @@ function parseDate(v?: string | null): Date | null {
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 }
+function getArrayFrom(resp: any, keys: string[]): any[] {
+  if (Array.isArray(resp)) return resp;
+  for (const k of keys) {
+    if (Array.isArray((resp as any)?.[k])) return (resp as any)[k];
+  }
+  if (resp && typeof resp === 'object') {
+    for (const v of Object.values(resp)) { if (Array.isArray(v)) return v as any[]; }
+  }
+  return [];
+}
 
 let LAST_ERROR_CODE: string | null = null;
 
@@ -284,14 +294,18 @@ server.tool(
     if (!opportunities) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les opportunités. Vérifiez votre connexion.");
     }
-    const parsed = OpportunitiesResponse.safeParse(opportunities);
-    if (!parsed.success) {
+    let listRaw: any[] = getArrayFrom(opportunities, ['opportunities','data','items','rows','list','results']);
+    if (listRaw.length === 0) {
+      const parsed = OpportunitiesResponse.safeParse(opportunities);
+      if (parsed.success) listRaw = parsed.data.opportunities;
+    }
+    if (listRaw.length === 0) {
       return buildError('S4', "Réponse inattendue du serveur pour les opportunités.");
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = parsed.data.opportunities.filter((o) => {
+    let list = listRaw.filter((o) => {
       const okStatus = normalizedStatus ? String(o.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(o.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
@@ -354,14 +368,18 @@ server.tool(
     if (!clients) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les clients. Vérifiez votre connexion.");
     }
-    const parsed = ClientsResponse.safeParse(clients);
-    if (!parsed.success) {
+    let listRaw: any[] = getArrayFrom(clients, ['clients','data','items','rows','list','results']);
+    if (listRaw.length === 0) {
+      const parsed = ClientsResponse.safeParse(clients);
+      if (parsed.success) listRaw = parsed.data.clients;
+    }
+    if (listRaw.length === 0) {
       return buildError('S4', "Réponse inattendue du serveur pour les clients.");
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = parsed.data.clients.filter((c) => {
+    let list = listRaw.filter((c) => {
       const okStatus = normalizedStatus ? String(c.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(c.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
@@ -427,14 +445,18 @@ server.tool(
     if (!purchases) {
       return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] } as any;
     }
-    const parsed = PurchasesResponse.safeParse(purchases);
-    if (!parsed.success) {
+    let listRaw: any[] = getArrayFrom(purchases, ['purchases','data','items','rows','list','results']);
+    if (listRaw.length === 0) {
+      const parsed = PurchasesResponse.safeParse(purchases);
+      if (parsed.success) listRaw = parsed.data.purchases;
+    }
+    if (listRaw.length === 0) {
       return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] } as any;
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = parsed.data.purchases.filter((p) => {
+    let list = listRaw.filter((p) => {
       const okStatus = normalizedStatus ? String(p.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(p.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
