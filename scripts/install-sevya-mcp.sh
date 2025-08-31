@@ -209,7 +209,7 @@ let LAST_ERROR_CODE: string | null = null;
 function buildError(code: string, text: string) {
   LAST_ERROR_CODE = code;
   console.error(`[MCP][${code}] ${text}`);
-  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] };
+  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] } as any;
 }
 
 // Helper function for making Sevya API requests (with timeout + robust errors)
@@ -268,13 +268,13 @@ async function makeSevyaRequest<T>(endpoint: string, method: string = "GET", dat
 server.tool(
   "get_opportunities",
   "Récupère les opportunités commerciales (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max d'opportunités à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -330,21 +330,21 @@ server.tool(
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedOpportunities}` }] };
+    return { content: [{ type: "text", text: `${header}\n\n${formattedOpportunities}` }] } as any;
   },
 );
 
 server.tool(
   "get_clients",
   "Récupère les clients (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max de clients à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Créés après cette date (ISO)"),
     to_date: z.string().optional().describe("Créés avant cette date (ISO)"),
     inactive_label: z.string().optional().describe("Libellé statut considéré comme inactif (par défaut: inactive/inactif)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date, inactive_label }) => {
     if (!checkRateLimit("get_clients")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -404,32 +404,32 @@ server.tool(
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''} | Inactifs (statut): ${inactiveCount}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedClients}` }] };
+    return { content: [{ type: "text", text: `${header}\n\n${formattedClients}` }] } as any;
   },
 );
 
 server.tool(
   "get_purchases",
   "Récupère les ventes/achats (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max de ventes à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_purchases")) {
-      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] };
+      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] } as any;
     }
     const purchases = await makeSevyaRequest<any>("/purchases");
     
     if (!purchases) {
-      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] };
+      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] } as any;
     }
     const parsed = PurchasesResponse.safeParse(purchases);
     if (!parsed.success) {
-      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] };
+      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] } as any;
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
@@ -480,7 +480,7 @@ server.tool(
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedPurchases}` }] };
+    return { content: [{ type: "text", text: `${header}\n\n${formattedPurchases}` }] } as any;
   },
 );
 
