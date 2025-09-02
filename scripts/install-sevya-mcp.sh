@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Script d'installation automatique du serveur MCP Sevya CRM
+# Version: 1.2.0 - Support UTM, form_id et outil get_current_date
 # Usage:
 #   ./install-sevya-mcp.sh
 # Remarque: la clé API est ajoutée manuellement dans le fichier Claude.
@@ -135,6 +136,7 @@ import { z } from "zod";
 const SEVYA_API_BASE = process.env.SEVYA_API_BASE || "https://tceelmvnduayksvnciwx.supabase.co/functions/v1";
 const API_KEY = process.env.SEVYA_API_KEY || "";
 const SERVER_NAME = process.env.SEVYA_PROFILE_NAME || "sevya-crm";
+const ENABLE_WRITES = process.env.SEVYA_ENABLE_WRITES === '1';
 
 // Create server instance
 const server = new McpServer({
@@ -170,6 +172,8 @@ const OpportunitySchema = z.object({
   notes: z.string().optional().nullable(),
   source: z.string().optional().nullable(),
   created_at: z.string().optional().nullable(),
+  utm: z.record(z.any()).optional().nullable(),
+  form_id: z.string().optional().nullable(),
 }).passthrough();
 
 const ClientSchema = z.object({
@@ -203,36 +207,29 @@ function parseDate(v?: string | null): Date | null {
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 }
-function getArrayFrom(resp: any, keys: string[]): any[] {
-  if (Array.isArray(resp)) return resp;
-  for (const k of keys) {
-    if (Array.isArray((resp as any)?.[k])) return (resp as any)[k];
-  }
-  if (resp && typeof resp === 'object') {
-    for (const v of Object.values(resp)) { if (Array.isArray(v)) return v as any[]; }
-  }
-  return [];
-}
 
 let LAST_ERROR_CODE: string | null = null;
 
 function buildError(code: string, text: string) {
   LAST_ERROR_CODE = code;
   console.error(`[MCP][${code}] ${text}`);
-  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] } as any;
+  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] };
 }
 
 // Helper function for making Sevya API requests (with timeout + robust errors)
-async function makeSevyaRequest<T>(endpoint: string, method: string = "GET", data?: any): Promise<T | null> {
+async function makeSevyaRequest<T>(endpoint: string, method: string = "GET", data?: any, extraHeaders?: Record<string,string>): Promise<T | null> {
   if (!API_KEY) {
     console.error("SEVYA_API_KEY manquante. Définissez-la dans la config Claude.");
     return null as any;
   }
 
-  const headers = {
+  const headers: Record<string,string> = {
     "Authorization": `ApiKey ${API_KEY}`,
     "Content-Type": "application/json",
   };
+  if (extraHeaders) {
+    for (const [k,v] of Object.entries(extraHeaders)) headers[k] = v;
+  }
 
   try {
     const controller = new AbortController();
@@ -276,15 +273,41 @@ async function makeSevyaRequest<T>(endpoint: string, method: string = "GET", dat
 
 // Register CRM tools
 server.tool(
+  "get_current_date",
+  "Retourne la date et l'heure actuelles du système",
+  {},
+  async () => {
+    const now = new Date();
+    const formatted = now.toLocaleString('fr-FR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    const iso = now.toISOString();
+
+    return {
+      content: [{
+        type: "text",
+        text: `📅 Date actuelle: ${formatted}\n🕐 ISO: ${iso}\n📆 Année: ${now.getFullYear()}`
+      }]
+    } as const;
+  },
+);
+
+server.tool(
   "get_opportunities",
   "Récupère les opportunités commerciales (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max d'opportunités à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -294,18 +317,14 @@ server.tool(
     if (!opportunities) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les opportunités. Vérifiez votre connexion.");
     }
-    let listRaw: any[] = getArrayFrom(opportunities, ['opportunities','data','items','rows','list','results']);
-    if (listRaw.length === 0) {
-      const parsed = OpportunitiesResponse.safeParse(opportunities);
-      if (parsed.success) listRaw = parsed.data.opportunities;
-    }
-    if (listRaw.length === 0) {
+    const parsed = OpportunitiesResponse.safeParse(opportunities);
+    if (!parsed.success) {
       return buildError('S4', "Réponse inattendue du serveur pour les opportunités.");
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = listRaw.filter((o) => {
+    let list = parsed.data.opportunities.filter((o) => {
       const okStatus = normalizedStatus ? String(o.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(o.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
@@ -339,26 +358,47 @@ server.tool(
         const date = new Date(opp.created_at).toLocaleDateString('fr-FR');
         formatted += `\nCréée le: ${date}`;
       }
-      
+
+      // Ajouter les paramètres UTM si présents
+      if (opp.utm && typeof opp.utm === 'object') {
+        const utmEntries = Object.entries(opp.utm)
+          .filter(([key, value]) => value && key.startsWith('utm_'))
+          .map(([key, value]) => `${key.replace('utm_', '').toUpperCase()}: ${value}`);
+
+        if (utmEntries.length > 0) {
+          formatted += `\n📊 UTM: ${utmEntries.join(', ')}`;
+        }
+
+        // Ajouter d'autres paramètres de tracking
+        if (opp.utm.gclid) formatted += `\n🔗 GCLID: ${opp.utm.gclid}`;
+        if (opp.utm.fbclid) formatted += `\n📘 FBCLID: ${opp.utm.fbclid}`;
+        if (opp.utm.page_url) formatted += `\n🌐 URL source: ${opp.utm.page_url}`;
+      }
+
+      // Ajouter l'ID du formulaire si présent
+      if (opp.form_id) {
+        formatted += `\n📝 ID Formulaire: ${opp.form_id}`;
+      }
+
       return formatted + '\n---';
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedOpportunities}` }] } as any;
+    return { content: [{ type: "text", text: `${header}\n\n${formattedOpportunities}` }] } as const;
   },
 );
 
 server.tool(
   "get_clients",
   "Récupère les clients (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max de clients à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Créés après cette date (ISO)"),
     to_date: z.string().optional().describe("Créés avant cette date (ISO)"),
     inactive_label: z.string().optional().describe("Libellé statut considéré comme inactif (par défaut: inactive/inactif)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date, inactive_label }) => {
     if (!checkRateLimit("get_clients")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -368,18 +408,14 @@ server.tool(
     if (!clients) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les clients. Vérifiez votre connexion.");
     }
-    let listRaw: any[] = getArrayFrom(clients, ['clients','data','items','rows','list','results']);
-    if (listRaw.length === 0) {
-      const parsed = ClientsResponse.safeParse(clients);
-      if (parsed.success) listRaw = parsed.data.clients;
-    }
-    if (listRaw.length === 0) {
+    const parsed = ClientsResponse.safeParse(clients);
+    if (!parsed.success) {
       return buildError('S4', "Réponse inattendue du serveur pour les clients.");
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = listRaw.filter((c) => {
+    let list = parsed.data.clients.filter((c) => {
       const okStatus = normalizedStatus ? String(c.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(c.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
@@ -422,41 +458,37 @@ server.tool(
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''} | Inactifs (statut): ${inactiveCount}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedClients}` }] } as any;
+    return { content: [{ type: "text", text: `${header}\n\n${formattedClients}` }] } as const;
   },
 );
 
 server.tool(
   "get_purchases",
   "Récupère les ventes/achats (données masquées)",
-  {
+  z.object({
     limit: z.number().optional().describe("Nombre max de ventes à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  },
+  }),
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_purchases")) {
-      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] } as any;
+      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] };
     }
     const purchases = await makeSevyaRequest<any>("/purchases");
     
     if (!purchases) {
-      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] } as any;
+      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] };
     }
-    let listRaw: any[] = getArrayFrom(purchases, ['purchases','data','items','rows','list','results']);
-    if (listRaw.length === 0) {
-      const parsed = PurchasesResponse.safeParse(purchases);
-      if (parsed.success) listRaw = parsed.data.purchases;
-    }
-    if (listRaw.length === 0) {
-      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] } as any;
+    const parsed = PurchasesResponse.safeParse(purchases);
+    if (!parsed.success) {
+      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] };
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
-    let list = listRaw.filter((p) => {
+    let list = parsed.data.purchases.filter((p) => {
       const okStatus = normalizedStatus ? String(p.status || '').toLowerCase() === normalizedStatus : true;
       const d = parseDate(p.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
@@ -502,7 +534,93 @@ server.tool(
     }).join("\n");
 
     const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nPar statut: ${JSON.stringify(byStatus)}`;
-    return { content: [{ type: "text", text: `${header}\n\n${formattedPurchases}` }] } as any;
+    return { content: [{ type: "text", text: `${header}\n\n${formattedPurchases}` }] } as const;
+  },
+);
+
+// --- Outils d'écriture (opt-in) ---
+const pendingTokens = new Map<string, any>();
+function newToken() {
+  try { return crypto.randomUUID(); } catch { return Math.random().toString(36).slice(2) + Date.now(); }
+}
+
+server.tool(
+  "create_client",
+  "Crée un client (contact) dans Sevya (écriture protégée)",
+  z.object({
+    name: z.string().min(1).describe("Nom du client (entreprise ou personne)"),
+    first_name: z.string().optional().describe("Prénom (si personne)"),
+    email: z.string().email().optional().describe("Email (optionnel)"),
+    phone: z.string().optional().describe("Téléphone (optionnel)"),
+    status: z.string().optional().describe("Statut client (ex: actif, inactif)"),
+    notes: z.string().optional().describe("Notes internes (max ~2000)"),
+    confirm: z.boolean().optional().default(false).describe("Confirmer la création (2-temps)"),
+    confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
+    idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
+  }),
+  async ({ name, first_name, email, phone, status, notes, confirm, confirm_token, idempotency_key }) => {
+    if (!ENABLE_WRITES) {
+      return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
+    }
+    // Étape 1: prévisualisation
+    const payload = { name, first_name, email, phone, status, notes } as any;
+    if (!confirm) {
+      const token = newToken();
+      pendingTokens.set(token, payload);
+      const preview = `Prévisualisation création client:\n- Nom: ${name}\n- Prénom: ${first_name ?? '—'}\n- Email: ${email ?? '—'}\n- Téléphone: ${phone ?? '—'}\n- Statut: ${status ?? '—'}\n- Notes: ${notes ? (String(notes).slice(0,140)+'…') : '—'}\n\nPour confirmer: relancez avec { confirm: true, confirm_token: "${token}" }`;
+      return { content: [{ type: "text", text: preview }] } as const;
+    }
+    // Étape 2: confirmation
+    const finalPayload = confirm_token && pendingTokens.get(confirm_token) ? pendingTokens.get(confirm_token) : payload;
+    const headers: Record<string,string> = {};
+    if (idempotency_key) headers['X-Idempotency-Key'] = idempotency_key;
+    const created = await makeSevyaRequest<any>("/clients", "POST", finalPayload, headers);
+    if (!created) {
+      return buildError(LAST_ERROR_CODE || 'W5', "Échec création client (réseau/HTTP).");
+    }
+    if (confirm_token) pendingTokens.delete(confirm_token);
+    const summary = `Client créé avec succès.\nID: ${created.id ?? 'inconnu'}\nNom: ${finalPayload.name}`;
+    return { content: [{ type: "text", text: summary }] } as const;
+  },
+);
+
+server.tool(
+  "create_opportunity",
+  "Crée une opportunité dans Sevya (écriture protégée)",
+  z.object({
+    name: z.string().min(3).describe("Nom de l'opportunité"),
+    client_id: z.union([z.string(), z.number()]).optional().describe("ID client existant (sinon fournir contact)"),
+    contact: z.object({ full_name: z.string().optional(), email: z.string().email().optional(), phone: z.string().optional() }).optional(),
+    estimated_amount: z.union([z.number(), z.string()]).optional().describe("Montant estimé"),
+    status: z.string().optional().describe("Statut initial (ex: nouveau)"),
+    source: z.string().optional().describe("Source (ex: Site web)"),
+    notes: z.string().optional().describe("Notes internes (max ~2000)"),
+    confirm: z.boolean().optional().default(false).describe("Confirmer la création (2-temps)"),
+    confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
+    idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
+  }),
+  async ({ name, client_id, contact, estimated_amount, status, source, notes, confirm, confirm_token, idempotency_key }) => {
+    if (!ENABLE_WRITES) {
+      return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
+    }
+    const payload: any = { name, client_id, estimated_amount, status, source, notes };
+    if (contact) payload.contact = contact;
+    if (!confirm) {
+      const token = newToken();
+      pendingTokens.set(token, payload);
+      const preview = `Prévisualisation création opportunité:\n- Nom: ${name}\n- Client ID: ${client_id ?? '—'}\n- Contact: ${contact ? JSON.stringify(contact) : '—'}\n- Montant estimé: ${estimated_amount ?? '—'}\n- Statut: ${status ?? '—'}\n- Source: ${source ?? '—'}\n- Notes: ${notes ? (String(notes).slice(0,140)+'…') : '—'}\n\nPour confirmer: relancez avec { confirm: true, confirm_token: "${token}" }`;
+      return { content: [{ type: "text", text: preview }] } as const;
+    }
+    const finalPayload = confirm_token && pendingTokens.get(confirm_token) ? pendingTokens.get(confirm_token) : payload;
+    const headers: Record<string,string> = {};
+    if (idempotency_key) headers['X-Idempotency-Key'] = idempotency_key;
+    const created = await makeSevyaRequest<any>("/opportunities", "POST", finalPayload, headers);
+    if (!created) {
+      return buildError(LAST_ERROR_CODE || 'W5', "Échec création opportunité (réseau/HTTP).");
+    }
+    if (confirm_token) pendingTokens.delete(confirm_token);
+    const summary = `Opportunité créée.\nID: ${created.id ?? 'inconnu'}\nNom: ${finalPayload.name}\nStatut: ${created.status ?? finalPayload.status ?? '—'}`;
+    return { content: [{ type: "text", text: summary }] } as const;
   },
 );
 
