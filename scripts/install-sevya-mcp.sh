@@ -309,7 +309,7 @@ server.tool(
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
   },
-  async ({ limit, offset, status, from_date, to_date }) => {
+  async ({ limit, offset, status, from_date, to_date }): Promise<any> => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
     }
@@ -400,7 +400,7 @@ server.tool(
     to_date: z.string().optional().describe("Créés avant cette date (ISO)"),
     inactive_label: z.string().optional().describe("Libellé statut considéré comme inactif (par défaut: inactive/inactif)"),
   },
-  async ({ limit, offset, status, from_date, to_date, inactive_label }) => {
+  async ({ limit, offset, status, from_date, to_date, inactive_label }): Promise<any> => {
     if (!checkRateLimit("get_clients")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
     }
@@ -473,7 +473,7 @@ server.tool(
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
   },
-  async ({ limit, offset, status, from_date, to_date }) => {
+  async ({ limit, offset, status, from_date, to_date }): Promise<any> => {
     if (!checkRateLimit("get_purchases")) {
       return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] } as const;
     }
@@ -562,7 +562,7 @@ server.tool(
     confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
     idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
   },
-  async ({ name, first_name, email, phone, status, notes, confirm, confirm_token, idempotency_key }) => {
+  async ({ name, first_name, email, phone, status, notes, confirm, confirm_token, idempotency_key }): Promise<any> => {
     if (!ENABLE_WRITES) {
       return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
     }
@@ -603,7 +603,7 @@ server.tool(
     confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
     idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
   },
-  async ({ name, client_id, contact, estimated_amount, status, source, notes, confirm, confirm_token, idempotency_key }) => {
+  async ({ name, client_id, contact, estimated_amount, status, source, notes, confirm, confirm_token, idempotency_key }): Promise<any> => {
     if (!ENABLE_WRITES) {
       return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
     }
