@@ -194,6 +194,7 @@ const PurchaseSchema = z.object({
   status: z.string().optional().nullable(),
   clients: PurchaseClientUnion,
   opportunity_id: z.union([z.number(), z.string()]).optional().nullable(),
+  date: z.string().optional().nullable(),
   created_at: z.string().optional().nullable(),
 }).passthrough();
 
@@ -301,13 +302,13 @@ server.tool(
 server.tool(
   "get_opportunities",
   "Récupère les opportunités commerciales (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max d'opportunités à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -391,14 +392,14 @@ server.tool(
 server.tool(
   "get_clients",
   "Récupère les clients (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max de clients à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Créés après cette date (ISO)"),
     to_date: z.string().optional().describe("Créés avant cette date (ISO)"),
     inactive_label: z.string().optional().describe("Libellé statut considéré comme inactif (par défaut: inactive/inactif)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date, inactive_label }) => {
     if (!checkRateLimit("get_clients")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
@@ -465,13 +466,13 @@ server.tool(
 server.tool(
   "get_purchases",
   "Récupère les ventes/achats (données masquées)",
-  z.object({
+  {
     limit: z.number().optional().describe("Nombre max de ventes à récupérer"),
     offset: z.number().optional().describe("Décalage de départ (pagination)"),
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
-  }),
+  },
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_purchases")) {
       return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] };
@@ -490,7 +491,8 @@ server.tool(
     const normalizedStatus = status ? String(status).toLowerCase() : null;
     let list = parsed.data.purchases.filter((p) => {
       const okStatus = normalizedStatus ? String(p.status || '').toLowerCase() === normalizedStatus : true;
-      const d = parseDate(p.created_at || undefined);
+      // Utiliser la date de vente si disponible, sinon la date de création
+      const d = parseDate(p.date || p.created_at || undefined);
       const okFrom = from ? (d ? d >= from : false) : true;
       const okTo = to ? (d ? d <= to : false) : true;
       return okStatus && okFrom && okTo;
@@ -524,10 +526,12 @@ server.tool(
         formatted += `\nOpportunité liée: ${purchase.opportunity_id}`;
       }
       
-      // Ajouter la date de création
-      if (purchase.created_at) {
-        const date = new Date(purchase.created_at).toLocaleDateString('fr-FR');
-        formatted += `\nCréée le: ${date}`;
+      // Ajouter la date de vente (préférée) ou à défaut la date de création
+      if (purchase.date || purchase.created_at) {
+        const baseDate = purchase.date || purchase.created_at;
+        const date = new Date(baseDate).toLocaleDateString('fr-FR');
+        const label = purchase.date ? 'Réalisée le' : 'Créée le';
+        formatted += `\n${label}: ${date}`;
       }
       
       return formatted + '\n---';
@@ -547,7 +551,7 @@ function newToken() {
 server.tool(
   "create_client",
   "Crée un client (contact) dans Sevya (écriture protégée)",
-  z.object({
+  {
     name: z.string().min(1).describe("Nom du client (entreprise ou personne)"),
     first_name: z.string().optional().describe("Prénom (si personne)"),
     email: z.string().email().optional().describe("Email (optionnel)"),
@@ -557,7 +561,7 @@ server.tool(
     confirm: z.boolean().optional().default(false).describe("Confirmer la création (2-temps)"),
     confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
     idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
-  }),
+  },
   async ({ name, first_name, email, phone, status, notes, confirm, confirm_token, idempotency_key }) => {
     if (!ENABLE_WRITES) {
       return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
@@ -587,7 +591,7 @@ server.tool(
 server.tool(
   "create_opportunity",
   "Crée une opportunité dans Sevya (écriture protégée)",
-  z.object({
+  {
     name: z.string().min(3).describe("Nom de l'opportunité"),
     client_id: z.union([z.string(), z.number()]).optional().describe("ID client existant (sinon fournir contact)"),
     contact: z.object({ full_name: z.string().optional(), email: z.string().email().optional(), phone: z.string().optional() }).optional(),
@@ -598,7 +602,7 @@ server.tool(
     confirm: z.boolean().optional().default(false).describe("Confirmer la création (2-temps)"),
     confirm_token: z.string().optional().describe("Jeton obtenu lors de l'étape 1"),
     idempotency_key: z.string().min(8).optional().describe("Clé d'idempotence pour éviter les doublons"),
-  }),
+  },
   async ({ name, client_id, contact, estimated_amount, status, source, notes, confirm, confirm_token, idempotency_key }) => {
     if (!ENABLE_WRITES) {
       return buildError('W0', "Écritures désactivées (SEVYA_ENABLE_WRITES != '1').");
