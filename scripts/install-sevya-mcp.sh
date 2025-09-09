@@ -214,7 +214,7 @@ let LAST_ERROR_CODE: string | null = null;
 function buildError(code: string, text: string) {
   LAST_ERROR_CODE = code;
   console.error(`[MCP][${code}] ${text}`);
-  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] };
+  return { content: [{ type: "text", text: `Erreur (${code}) : ${text}` }] } as const;
 }
 
 // Helper function for making Sevya API requests (with timeout + robust errors)
@@ -475,16 +475,16 @@ server.tool(
   },
   async ({ limit, offset, status, from_date, to_date }) => {
     if (!checkRateLimit("get_purchases")) {
-      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] };
+      return { content: [{ type: "text", text: "Erreur (S6) : Trop d'appels rapprochés. Réessayez dans quelques secondes." }] } as const;
     }
     const purchases = await makeSevyaRequest<any>("/purchases");
     
     if (!purchases) {
-      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] };
+      return { content: [{ type: "text", text: `Erreur (${LAST_ERROR_CODE || 'S3'}) : Impossible de récupérer les ventes. Vérifiez votre connexion.` }] } as const;
     }
     const parsed = PurchasesResponse.safeParse(purchases);
     if (!parsed.success) {
-      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] };
+      return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] } as const;
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
