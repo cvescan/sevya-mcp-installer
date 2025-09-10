@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script d'installation automatique du serveur MCP Sevya CRM
-# Version: 1.2.3 - Affichage Code postal + count_only
+# Version: 1.2.4 - CP ventes via opportunités + CP opportunités + count_only
 # Usage:
 #   ./install-sevya-mcp.sh
 # Remarque: la clé API est ajoutée manuellement dans le fichier Claude.
@@ -71,7 +71,7 @@ npm init -y
 cat > package.json << 'EOF'
 {
   "name": "sevya-mcp-server",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "MCP Server pour Sevya CRM",
   "main": "build/index.js",
   "type": "module",
@@ -601,6 +601,24 @@ server.tool(
     if (!parsed.success) {
       return { content: [{ type: "text", text: "Erreur (S4) : Réponse inattendue du serveur pour les ventes." }] } as const;
     }
+    // Précharger les opportunités pour récupérer le code postal lié
+    let oppById: Map<string, any> = new Map();
+    try {
+      const oppRaw = await makeSevyaRequest<any>("/opportunities");
+      if (oppRaw) {
+        let payload: any = oppRaw;
+        if (Array.isArray(payload)) payload = { opportunities: payload };
+        const oppParsed = OpportunitiesResponse.safeParse(payload);
+        if (oppParsed.success) {
+          for (const o of oppParsed.data.opportunities) {
+            const oid = (o as any).id;
+            if (oid !== undefined && oid !== null) {
+              oppById.set(String(oid), o);
+            }
+          }
+        }
+      }
+    } catch {}
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);
     const normalizedStatus = status ? String(status).toLowerCase() : null;
@@ -636,9 +654,16 @@ server.tool(
         }
       }
       
-      // Ajouter l'opportunité liée si présente
+      // Ajouter l'opportunité liée si présente + Code postal depuis l'opportunité
       if (purchase.opportunity_id) {
         formatted += `\nOpportunité liée: ${purchase.opportunity_id}`;
+        const opp = oppById.get(String(purchase.opportunity_id));
+        if (opp) {
+          const postal = extractPostalCodeFromOpportunity(opp);
+          if (postal) {
+            formatted += `\nCode postal: ${postal}`;
+          }
+        }
       }
       
       // Ajouter la date de vente (préférée) ou à défaut la date de création

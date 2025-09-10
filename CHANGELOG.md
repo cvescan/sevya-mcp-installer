@@ -21,6 +21,11 @@
   - Reads from common fields: `zip_code`, `zipcode`, `postal_code`, `postcode`, `cp`, or `address.*`.
   - Fallback: extract from `notes` or custom fields (heuristic), matching a 5-digit FR pattern.
 
+## v1.2.4 — 2025-09-10
+
+- Feature: `get_purchases` shows postal code sourced from the linked opportunity (via `opportunity_id`).
+  - Preloads opportunities and maps by `id` to enrich purchase output.
+
 ## v1.2.0 — 2025-09-02
 
 - Feature: Expose `utm` (JSON) and `form_id` for opportunities in the MCP server schema.
