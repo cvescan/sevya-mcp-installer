@@ -172,6 +172,8 @@ const OpportunitySchema = z.object({
   notes: z.string().optional().nullable(),
   source: z.string().optional().nullable(),
   created_at: z.string().optional().nullable(),
+  won_at: z.string().optional().nullable(),
+  lost_at: z.string().optional().nullable(),
   utm: z.record(z.any()).optional().nullable(),
   form_id: z.string().optional().nullable(),
 }).passthrough();
@@ -791,6 +793,63 @@ server.tool(
   },
 );
 
+server.tool(
+  "get_conversion_stats",
+  "Calcule les conversions sur une période en utilisant won_at/lost_at",
+  {
+    from_date: z.string().optional().describe("Début de période (ISO)"),
+    to_date: z.string().optional().describe("Fin de période (ISO)"),
+  },
+  async ({ from_date, to_date }): Promise<any> => {
+    if (!checkRateLimit("get_conversion_stats")) {
+      return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
+    }
+    const raw = await makeSevyaRequest<any>("/opportunities");
+    if (!raw) return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les opportunités.");
+    const arr = normalizeOpportunitiesArray(raw);
+    const payload = { opportunities: arr };
+    const parsed = OpportunitiesResponse.safeParse(payload);
+    if (!parsed.success) return buildError('S4', "Réponse inattendue du serveur (opportunités).");
+
+    const from = parseDate(from_date ?? undefined);
+    const to = parseDate(to_date ?? undefined);
+    const inRange = (d: Date | null) => {
+      if (!d) return false;
+      const okFrom = from ? d >= from : true;
+      const okTo = to ? d <= to : true;
+      return okFrom && okTo;
+    };
+
+    const list = parsed.data.opportunities as any[];
+    const winsInPeriod = list.filter((o) => inRange(parseDate(o.won_at || null)));
+    const lossesInPeriod = list.filter((o) => inRange(parseDate(o.lost_at || null)));
+    const closedTotal = winsInPeriod.length + lossesInPeriod.length;
+    const conversionPeriod = closedTotal > 0 ? (winsInPeriod.length / closedTotal) : null;
+
+    const createdInPeriod = list.filter((o) => inRange(parseDate(o.created_at || null)));
+    const eventuallyWonOfCreated = createdInPeriod.filter((o) => !!o.won_at).length;
+
+    const closedList = [...winsInPeriod.map((o) => ({ kind: 'gagné', date: o.won_at, name: o.name })),
+                        ...lossesInPeriod.map((o) => ({ kind: 'perdu', date: o.lost_at, name: o.name }))]
+      .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+
+    const header = `Conversions sur la période${from_date ? ` depuis=${from_date}` : ''}${to_date ? ` jusqu'au=${to_date}` : ''}`;
+    const lines: string[] = [];
+    lines.push(`Gagnées (période): ${winsInPeriod.length}`);
+    lines.push(`Perdues (période): ${lossesInPeriod.length}`);
+    lines.push(`Taux (période): ${conversionPeriod === null ? '—' : `${(conversionPeriod*100).toFixed(1)}%`} (wins / (wins+losses))`);
+    lines.push(`Créées (période): ${createdInPeriod.length}`);
+    lines.push(`Parmi créées: ${eventuallyWonOfCreated} gagnées (à terme)`);
+    lines.push('Clôtures:');
+    for (const c of closedList) {
+      const d = c.date ? new Date(c.date).toLocaleDateString('fr-FR') : '—';
+      lines.push(`- ${d} — ${c.name ?? '—'} — ${c.kind}`);
+    }
+
+    return { content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }] } as const;
+  },
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -802,6 +861,12 @@ main().catch((error) => {
   process.exit(1);
 });
 EOF
+
+# Append new tool (conversion stats) to the generated server file
+ed -s src/index.ts <<'ED'
+/$\n/-8
+,$p
+ED
 
 # Compiler le serveur
 echo -e "${BLUE}🔨 Compilation du serveur...${NC}"
