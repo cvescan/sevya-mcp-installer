@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script d'installation automatique du serveur MCP Sevya CRM
-# Version: 1.2.0 - Support UTM, form_id et outil get_current_date
+# Version: 1.2.1 - Normalisation robuste opportunities + nullables + diagnostics
 # Usage:
 #   ./install-sevya-mcp.sh
 # Remarque: la clé API est ajoutée manuellement dans le fichier Claude.
@@ -71,7 +71,7 @@ npm init -y
 cat > package.json << 'EOF'
 {
   "name": "sevya-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP Server pour Sevya CRM",
   "main": "build/index.js",
   "type": "module",
@@ -86,11 +86,11 @@ cat > package.json << 'EOF'
   "author": "Sevya Team",
   "license": "ISC",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^3.22.4"
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^20.19.11",
+    "@types/node": "^20.19.13",
     "typescript": "^5.9.2"
   },
   "files": ["build"]
@@ -167,8 +167,8 @@ function checkRateLimit(tool: string): boolean {
 const OpportunitySchema = z.object({
   name: z.string().optional(),
   status: z.string().optional(),
-  estimated_amount: z.union([z.number(), z.string()]).optional(),
-  client_id: z.union([z.number(), z.string()]).optional(),
+  estimated_amount: z.union([z.number(), z.string()]).optional().nullable(),
+  client_id: z.union([z.number(), z.string()]).optional().nullable(),
   notes: z.string().optional().nullable(),
   source: z.string().optional().nullable(),
   created_at: z.string().optional().nullable(),
@@ -318,9 +318,68 @@ server.tool(
     if (!opportunities) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les opportunités. Vérifiez votre connexion.");
     }
-    const parsed = OpportunitiesResponse.safeParse(opportunities);
+    // Tolérer différents formats de réponse ({ opportunities: [...] } ou tableaux/alias courants)
+    let payload: any = opportunities;
+    try {
+      const pickArray = (obj: any): any[] | null => {
+        if (!obj || typeof obj !== 'object') return null;
+        const direct = obj as any;
+        if (Array.isArray(direct.opportunities)) return direct.opportunities;
+        const candidates = ['data','items','results','records','list','rows'];
+        for (const k of candidates) {
+          if (Array.isArray(direct[k])) return direct[k];
+        }
+        // Chercher en profondeur simple sous "data"
+        if (direct.data && typeof direct.data === 'object') {
+          const d = direct.data as any;
+          if (Array.isArray(d.opportunities)) return d.opportunities;
+          for (const k of candidates) {
+            if (Array.isArray(d[k])) return d[k];
+          }
+        }
+        return null;
+      };
+
+      if (Array.isArray(payload)) {
+        payload = { opportunities: payload };
+      } else if (payload && typeof payload === 'object') {
+        const direct: any = payload;
+        let arr = pickArray(direct);
+        // Si "opportunities" existe mais n'est pas un tableau, tenter de l'extraire
+        if (!arr && direct.opportunities !== undefined) {
+          const oc = direct.opportunities;
+          if (Array.isArray(oc)) {
+            arr = oc;
+          } else if (oc && typeof oc === 'object') {
+            // Essayer les conventions courantes: nodes/edges
+            if (Array.isArray(oc.nodes)) {
+              arr = oc.nodes;
+            } else if (Array.isArray(oc.edges)) {
+              arr = oc.edges.map((e: any) => e && typeof e === 'object' && 'node' in e ? e.node : e);
+            }
+            if (!arr) {
+              const inner = pickArray(oc);
+              if (inner) arr = inner;
+              else if (oc.data && typeof oc.data === 'object') {
+                const inner2 = pickArray(oc.data);
+                if (inner2) arr = inner2;
+              }
+            }
+          } else if (oc === null) {
+            arr = [];
+          }
+        }
+        if (arr) payload = { opportunities: arr };
+      }
+    } catch (e) {
+      // Ne pas interrompre, on laissera Zod décider ensuite
+      console.error('[MCP] Normalisation opportunities a échoué', e);
+    }
+
+    const parsed = OpportunitiesResponse.safeParse(payload);
     if (!parsed.success) {
-      return buildError('S4', "Réponse inattendue du serveur pour les opportunités.");
+      const keys = payload && typeof payload === 'object' ? Object.keys(payload as any).join(',') : String(typeof payload);
+      return buildError('S4', `Réponse inattendue du serveur pour les opportunités. (clés: ${keys})`);
     }
     const from = parseDate(from_date ?? undefined);
     const to = parseDate(to_date ?? undefined);

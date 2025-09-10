@@ -1,5 +1,15 @@
 # Changelog — Sevya MCP Installer
 
+## v1.2.1 — 2025-09-10
+
+- Fix: Harden `get_opportunities` to accept varied response shapes from the Edge Function:
+  - Accept arrays at root or under `opportunities`, `data`, `items`, `results`, `records`, `list`, `rows`.
+  - Handle nested containers like `opportunities.nodes` or `opportunities.edges[].node`.
+  - Normalize `null` opportunities to an empty list.
+- Schema: Allow `null` for `estimated_amount` and `client_id` in opportunities.
+- DX: Enrich S4 error with top-level keys to speed up diagnosis.
+- Dependencies: Bump `@modelcontextprotocol/sdk` and `zod` versions in installer.
+
 ## v1.2.0 — 2025-09-02
 
 - Feature: Expose `utm` (JSON) and `form_id` for opportunities in the MCP server schema.
