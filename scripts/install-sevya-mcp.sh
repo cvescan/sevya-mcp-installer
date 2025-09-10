@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script d'installation automatique du serveur MCP Sevya CRM
-# Version: 1.2.2 - Option count_only + clarification 'opportunités créées'
+# Version: 1.2.3 - Affichage Code postal + count_only
 # Usage:
 #   ./install-sevya-mcp.sh
 # Remarque: la clé API est ajoutée manuellement dans le fichier Claude.
@@ -71,7 +71,7 @@ npm init -y
 cat > package.json << 'EOF'
 {
   "name": "sevya-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "MCP Server pour Sevya CRM",
   "main": "build/index.js",
   "type": "module",
@@ -207,6 +207,50 @@ function parseDate(v?: string | null): Date | null {
   if (!v) return null;
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
+}
+
+function normToPostalCode(value: any): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  const m = s.match(/\b(\d{5})\b/);
+  return m ? m[1] : null;
+}
+
+function extractPostalCodeFromOpportunity(opp: any): string | null {
+  try {
+    const directKeys = ["zip_code","zipcode","postal_code","postcode","cp"]; 
+    for (const k of directKeys) {
+      if (k in opp) {
+        const pc = normToPostalCode(opp[k]);
+        if (pc) return pc;
+      }
+    }
+    if (opp && typeof opp.address === 'object' && opp.address) {
+      const addr = opp.address as any;
+      for (const k of directKeys) {
+        if (k in addr) {
+          const pc = normToPostalCode(addr[k]);
+          if (pc) return pc;
+        }
+      }
+      for (const [,v] of Object.entries(addr)) {
+        const pc = normToPostalCode(v);
+        if (pc) return pc;
+      }
+    }
+    for (const [k,v] of Object.entries(opp)) {
+      if (!v || typeof v === 'object') continue;
+      if (/zip|postal|postcode|code[_ ]?postal|\bcp\b/i.test(k)) {
+        const pc = normToPostalCode(v);
+        if (pc) return pc;
+      }
+    }
+    if (opp && typeof opp.notes === 'string') {
+      const pc = normToPostalCode(opp.notes);
+      if (pc) return pc;
+    }
+  } catch {}
+  return null;
 }
 
 let LAST_ERROR_CODE: string | null = null;
@@ -410,6 +454,10 @@ server.tool(
     
     const formattedOpportunities = limitedList.map((opp: any) => {
       let formatted = `Opportunité: ${opp.name ?? "—"}\nStatut: ${opp.status ?? "—"}\nMontant estimé: ${opp.estimated_amount ?? "—"}€\nClient: ${opp.client_id ?? "—"}`;
+      const postal = extractPostalCodeFromOpportunity(opp);
+      if (postal) {
+        formatted += `\nCode postal: ${postal}`;
+      }
       
       // Ajouter les notes si présentes
       if (opp.notes && String(opp.notes).trim()) {

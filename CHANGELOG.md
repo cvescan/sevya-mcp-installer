@@ -15,6 +15,12 @@
 - Feature: Add `count_only` option to `get_opportunities` to return only the number of opportunities created in a given period (based on `created_at`).
 - UX: Clarify header to explicitly state “opportunités créées” and add a note that status breakdown reflects the current state, not conversions during the period.
 
+## v1.2.3 — 2025-09-10
+
+- Feature: Display postal code in `get_opportunities` when available.
+  - Reads from common fields: `zip_code`, `zipcode`, `postal_code`, `postcode`, `cp`, or `address.*`.
+  - Fallback: extract from `notes` or custom fields (heuristic), matching a 5-digit FR pattern.
+
 ## v1.2.0 — 2025-09-02
 
 - Feature: Expose `utm` (JSON) and `form_id` for opportunities in the MCP server schema.
