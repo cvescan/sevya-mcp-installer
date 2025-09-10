@@ -10,6 +10,11 @@
 - DX: Enrich S4 error with top-level keys to speed up diagnosis.
 - Dependencies: Bump `@modelcontextprotocol/sdk` and `zod` versions in installer.
 
+## v1.2.2 — 2025-09-10
+
+- Feature: Add `count_only` option to `get_opportunities` to return only the number of opportunities created in a given period (based on `created_at`).
+- UX: Clarify header to explicitly state “opportunités créées” and add a note that status breakdown reflects the current state, not conversions during the period.
+
 ## v1.2.0 — 2025-09-02
 
 - Feature: Expose `utm` (JSON) and `form_id` for opportunities in the MCP server schema.

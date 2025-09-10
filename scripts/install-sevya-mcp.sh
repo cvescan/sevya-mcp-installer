@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script d'installation automatique du serveur MCP Sevya CRM
-# Version: 1.2.1 - Normalisation robuste opportunities + nullables + diagnostics
+# Version: 1.2.2 - Option count_only + clarification 'opportunités créées'
 # Usage:
 #   ./install-sevya-mcp.sh
 # Remarque: la clé API est ajoutée manuellement dans le fichier Claude.
@@ -308,8 +308,9 @@ server.tool(
     status: z.string().optional().describe("Filtrer par statut"),
     from_date: z.string().optional().describe("Filtrer à partir de cette date (ISO)"),
     to_date: z.string().optional().describe("Filtrer jusqu'à cette date (ISO)"),
+    count_only: z.boolean().optional().describe("Retourne uniquement le nombre d'opportunités créées dans la période"),
   },
-  async ({ limit, offset, status, from_date, to_date }): Promise<any> => {
+  async ({ limit, offset, status, from_date, to_date, count_only }): Promise<any> => {
     if (!checkRateLimit("get_opportunities")) {
       return buildError('S6', "Trop d'appels rapprochés. Réessayez dans quelques secondes.");
     }
@@ -400,6 +401,13 @@ server.tool(
     if (typeof offset === 'number' && offset > 0) list = list.slice(offset);
     const limitedList = typeof limit === 'number' ? list.slice(0, limit) : list;
     
+    // Mode minimal: uniquement le nombre d'opportunités créées dans la période
+    if (count_only) {
+      const period = `${from_date ? from_date : '—'} → ${to_date ? to_date : '—'}`;
+      const text = `Total d'opportunités créées dans la période (${period}) : ${total}`;
+      return { content: [{ type: "text", text }] } as const;
+    }
+    
     const formattedOpportunities = limitedList.map((opp: any) => {
       let formatted = `Opportunité: ${opp.name ?? "—"}\nStatut: ${opp.status ?? "—"}\nMontant estimé: ${opp.estimated_amount ?? "—"}€\nClient: ${opp.client_id ?? "—"}`;
       
@@ -443,7 +451,7 @@ server.tool(
       return formatted + '\n---';
     }).join("\n");
 
-    const header = `Résumé: total=${total}${normalizedStatus ? `, statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nPar statut: ${JSON.stringify(byStatus)}`;
+    const header = `Résumé (opportunités créées): total=${total}${normalizedStatus ? `, filtre statut=${normalizedStatus}` : ''}${from_date ? `, depuis=${from_date}` : ''}${to_date ? `, jusqu'au=${to_date}` : ''}\nNote: les statuts reflètent l'état ACTUEL, pas la date de conversion\nPar statut (état actuel): ${JSON.stringify(byStatus)}`;
     return { content: [{ type: "text", text: `${header}\n\n${formattedOpportunities}` }] } as const;
   },
 );
