@@ -216,6 +216,79 @@ function normToPostalCode(value: any): string | null {
   return m ? m[1] : null;
 }
 
+function normalizeOpportunitiesArray(raw: any): any[] {
+  try {
+    if (Array.isArray(raw)) return raw;
+    const pickArray = (obj: any): any[] | null => {
+      if (!obj || typeof obj !== 'object') return null;
+      const direct = obj as any;
+      if (Array.isArray(direct.opportunities)) return direct.opportunities;
+      const candidates = ['data','items','results','records','list','rows'];
+      for (const k of candidates) {
+        if (Array.isArray(direct[k])) return direct[k];
+      }
+      if (direct.data && typeof direct.data === 'object') {
+        const d = direct.data as any;
+        if (Array.isArray(d.opportunities)) return d.opportunities;
+        for (const k of candidates) {
+          if (Array.isArray(d[k])) return d[k];
+        }
+      }
+      if (direct.opportunities !== undefined) {
+        const oc = direct.opportunities;
+        if (Array.isArray(oc)) return oc;
+        if (oc && typeof oc === 'object') {
+          if (Array.isArray(oc.nodes)) return oc.nodes;
+          if (Array.isArray(oc.edges)) return oc.edges.map((e: any) => e && typeof e === 'object' && 'node' in e ? e.node : e);
+          const inner = pickArray(oc);
+          if (inner) return inner;
+          if (oc.data && typeof oc.data === 'object') {
+            const inner2 = pickArray(oc.data);
+            if (inner2) return inner2;
+          }
+        }
+        if (oc === null) return [];
+      }
+      return null;
+    };
+    const arr = pickArray(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function extractServiceFromOpportunity(opp: any): string | null {
+  try {
+    const directKeys = ['service','service_name','product','product_name','category','type','offer','package','solution'];
+    for (const k of directKeys) {
+      if (opp && opp[k]) {
+        const val = String(opp[k]).trim();
+        if (val) return val;
+      }
+    }
+    if (opp && opp.utm && typeof opp.utm === 'object') {
+      const um = opp.utm;
+      const candidates = [um.utm_campaign, um.utm_content, um.utm_term];
+      for (const c of candidates) {
+        if (c && String(c).trim()) return String(c).trim();
+      }
+    }
+    const hay = ((opp?.name ? String(opp.name) + ' ' : '') + (opp?.notes ? String(opp.notes) : '')).toLowerCase();
+    const patterns = [
+      { re: /vid[eé]o|cam[eé]ra|surveillance/, label: 'Vidéosurveillance' },
+      { re: /alarme|intrusion|d[ée]tection/, label: 'Alarme' },
+      { re: /interphone|visiophone|interphonie/, label: 'Interphonie' },
+      { re: /contr[oô]le d'?acc[eè]s|badge|lecteur/, label: "Contrôle d'accès" },
+      { re: /portail|motorisation/, label: 'Motorisation/Portail' }
+    ];
+    for (const p of patterns) {
+      if (p.re.test(hay)) return p.label;
+    }
+  } catch {}
+  return null;
+}
+
 function extractPostalCodeFromOpportunity(opp: any): string | null {
   try {
     const directKeys = ["zip_code","zipcode","postal_code","postcode","cp"]; 
@@ -363,64 +436,7 @@ server.tool(
     if (!opportunities) {
       return buildError(LAST_ERROR_CODE || 'S3', "Impossible de récupérer les opportunités. Vérifiez votre connexion.");
     }
-    // Tolérer différents formats de réponse ({ opportunities: [...] } ou tableaux/alias courants)
-    let payload: any = opportunities;
-    try {
-      const pickArray = (obj: any): any[] | null => {
-        if (!obj || typeof obj !== 'object') return null;
-        const direct = obj as any;
-        if (Array.isArray(direct.opportunities)) return direct.opportunities;
-        const candidates = ['data','items','results','records','list','rows'];
-        for (const k of candidates) {
-          if (Array.isArray(direct[k])) return direct[k];
-        }
-        // Chercher en profondeur simple sous "data"
-        if (direct.data && typeof direct.data === 'object') {
-          const d = direct.data as any;
-          if (Array.isArray(d.opportunities)) return d.opportunities;
-          for (const k of candidates) {
-            if (Array.isArray(d[k])) return d[k];
-          }
-        }
-        return null;
-      };
-
-      if (Array.isArray(payload)) {
-        payload = { opportunities: payload };
-      } else if (payload && typeof payload === 'object') {
-        const direct: any = payload;
-        let arr = pickArray(direct);
-        // Si "opportunities" existe mais n'est pas un tableau, tenter de l'extraire
-        if (!arr && direct.opportunities !== undefined) {
-          const oc = direct.opportunities;
-          if (Array.isArray(oc)) {
-            arr = oc;
-          } else if (oc && typeof oc === 'object') {
-            // Essayer les conventions courantes: nodes/edges
-            if (Array.isArray(oc.nodes)) {
-              arr = oc.nodes;
-            } else if (Array.isArray(oc.edges)) {
-              arr = oc.edges.map((e: any) => e && typeof e === 'object' && 'node' in e ? e.node : e);
-            }
-            if (!arr) {
-              const inner = pickArray(oc);
-              if (inner) arr = inner;
-              else if (oc.data && typeof oc.data === 'object') {
-                const inner2 = pickArray(oc.data);
-                if (inner2) arr = inner2;
-              }
-            }
-          } else if (oc === null) {
-            arr = [];
-          }
-        }
-        if (arr) payload = { opportunities: arr };
-      }
-    } catch (e) {
-      // Ne pas interrompre, on laissera Zod décider ensuite
-      console.error('[MCP] Normalisation opportunities a échoué', e);
-    }
-
+    const payload = { opportunities: normalizeOpportunitiesArray(opportunities) };
     const parsed = OpportunitiesResponse.safeParse(payload);
     if (!parsed.success) {
       const keys = payload && typeof payload === 'object' ? Object.keys(payload as any).join(',') : String(typeof payload);
@@ -457,6 +473,10 @@ server.tool(
       const postal = extractPostalCodeFromOpportunity(opp);
       if (postal) {
         formatted += `\nCode postal: ${postal}`;
+      }
+      const svc = extractServiceFromOpportunity(opp);
+      if (svc) {
+        formatted += `\nService: ${svc}`;
       }
       
       // Ajouter les notes si présentes
@@ -605,16 +625,12 @@ server.tool(
     let oppById: Map<string, any> = new Map();
     try {
       const oppRaw = await makeSevyaRequest<any>("/opportunities");
-      if (oppRaw) {
-        let payload: any = oppRaw;
-        if (Array.isArray(payload)) payload = { opportunities: payload };
-        const oppParsed = OpportunitiesResponse.safeParse(payload);
-        if (oppParsed.success) {
-          for (const o of oppParsed.data.opportunities) {
-            const oid = (o as any).id;
-            if (oid !== undefined && oid !== null) {
-              oppById.set(String(oid), o);
-            }
+      const arr = normalizeOpportunitiesArray(oppRaw);
+      if (arr.length) {
+        for (const o of arr) {
+          const oid = (o as any).id;
+          if (oid !== undefined && oid !== null) {
+            oppById.set(String(oid), o);
           }
         }
       }
@@ -662,6 +678,10 @@ server.tool(
           const postal = extractPostalCodeFromOpportunity(opp);
           if (postal) {
             formatted += `\nCode postal: ${postal}`;
+          }
+          const svc = extractServiceFromOpportunity(opp);
+          if (svc) {
+            formatted += `\nService: ${svc}`;
           }
         }
       }
