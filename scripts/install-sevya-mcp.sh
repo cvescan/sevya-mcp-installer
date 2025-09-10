@@ -291,7 +291,10 @@ function extractServiceFromOpportunity(opp: any): string | null {
 
 function extractPostalCodeFromOpportunity(opp: any): string | null {
   try {
-    const directKeys = ["zip_code","zipcode","postal_code","postcode","cp"]; 
+    const directKeys = [
+      "zip_code","zipcode","zipCode","zip",
+      "postal_code","postalCode","postcode","code_postal","cp","postal"
+    ]; 
     for (const k of directKeys) {
       if (k in opp) {
         const pc = normToPostalCode(opp[k]);
