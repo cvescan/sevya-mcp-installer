@@ -12,6 +12,15 @@ What changed (v1.2.1–v1.2.4)
  - Postal code: `get_opportunities` now displays `Code postal` when present (common fields and `address.*`), with heuristic fallback from `notes`/custom fields.
  - Purchases: `get_purchases` now enriches each sale with `Code postal` pulled from the linked opportunity (`opportunity_id`).
 
+Edge Functions (Supabase) — opportunities
+- Update (2025-09-10): Expose `zip_code` in GET response; removed non-existent column `address` from SELECT to fix Postgres 42703.
+- Deployed versions: v53 (failed due to `address`), hotfixed to v54 (OK) on project `tceelmvnduayksvnciwx`.
+- Impact: MCP can reliably read `zip_code` from opportunities; purchases join now yields “Code postal” in output when present.
+
+Operational notes
+- If opportunities lack `zip_code`, MCP attempts fallbacks (custom fields/notes regex) but accuracy depends on data quality.
+- For count logic, `count_only: true` returns the number of opportunities created in the period (uses `created_at`).
+
 Files affected
 - `scripts/install-sevya-mcp.sh`: embedded `src/index.ts` and package.json template updated.
 - `CHANGELOG.md`: new entry `v1.2.1`.
